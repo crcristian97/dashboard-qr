@@ -58,14 +58,14 @@ export const getGuests = async (req, res) => {
     }
 };
 
-
 export const verifyGuest = async (req, res) => {
     try {
-        const { guestId, qrData } = req.body;
+        const { qrData } = req.body;
 
-        // Find the guest by the scanned QR data (which should be the guest ID)
+        // Encuentra el invitado por el código QR escaneado
         const guest = await Guest.findById(qrData);
 
+        // Verifica si el invitado existe
         if (!guest) {
             return res.status(404).json({ 
                 success: false, 
@@ -73,20 +73,21 @@ export const verifyGuest = async (req, res) => {
             });
         }
 
-        // Verify this is the guest we're trying to check in
-        if (guest._id.toString() !== guestId) {
+        // Verifica si el invitado ya ha ingresado
+        if (guest.hasEntered) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Código QR no coincide con el invitado' 
+                message: 'Código QR ya utilizado o inválido' 
             });
         }
 
+        // Marca al invitado como ingresado y guarda los cambios
         guest.hasEntered = true;
         await guest.save();
 
         return res.status(200).json({ 
             success: true, 
-            message: 'Invitado verificado exitosamente',
+            message: 'Excelente, invitado verificado exitosamente',
             guest 
         });
 

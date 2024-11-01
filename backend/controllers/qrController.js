@@ -1,25 +1,41 @@
 // backend/controllers/qrController.js
 import Guest from '../models/Guest.js';
-import fetch from 'node-fetch';
+import QRCode from 'qrcode';
 
 export const createGuest = async (req, res) => {
+    console.log('=== Starting Guest Creation ===');
+    console.log('Request body:', req.body);
+
     const { name, email } = req.body;
 
     try {
-        const guestData = `${name}-${Date.now()}`;
-
+        // Create initial guest
         const guest = new Guest({ name, email });
-        await guest.save();
+        console.log('Guest object created:', guest);
 
-        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(guestData)}`;
+        // Save guest first time
+        const savedGuest = await guest.save();
+        console.log('Guest saved initially:', savedGuest);
 
-        guest.qrCode = qrCodeUrl;
-        await guest.save();
+        // Generate QR code
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(savedGuest._id.toString())}`;
+        console.log('Generated QR URL:', qrCodeUrl);
 
-        console.log("QR Code URL:", qrCodeUrl); // <-- Añadir este log
-        res.json({ message: "Invitado creado", guest });
+        // Update guest with QR code
+        savedGuest.qrCode = qrCodeUrl;
+        const finalGuest = await savedGuest.save();
+        console.log('Guest saved with QR:', finalGuest);
+
+        res.json({ 
+            message: "Invitado creado exitosamente", 
+            guest: finalGuest 
+        });
     } catch (err) {
-        res.status(500).json({ message: "Error al crear invitado", error: err.message });
+        console.error('Error creating guest:', err);
+        res.status(500).json({ 
+            message: "Error al crear invitado", 
+            error: err.message 
+        });
     }
 };
 
@@ -48,6 +64,38 @@ export const scanQR = async (req, res) => {
     }
 };
 
+export const getGuestQR = async (req, res) => {
+    try {
+        const { guestId } = req.params;
+        console.log('Starting QR generation for guestId:', guestId);
+
+        const guest = await Guest.findById(guestId);
+        if (!guest) {
+            return res.status(404).json({ message: 'Invitado no encontrado' });
+        }
+
+        // Create verification URL
+        const verificationUrl = `${process.env.FRONTEND_URL}/verify/${guestId}`;
+        console.log('Generated verification URL:', verificationUrl);
+
+        // Generate QR code with the verification URL
+        const qrCodeDataUrl = await QRCode.toDataURL(verificationUrl);
+        
+        // Update guest with QR code
+        guest.qrCode = qrCodeDataUrl;
+        await guest.save();
+
+        return res.json({ qrCode: qrCodeDataUrl });
+
+    } catch (error) {
+        console.error('QR generation error:', error);
+        return res.status(500).json({ 
+            message: 'Error al generar código QR', 
+            error: error.message 
+        });
+    }
+};
+
 export const getGuests = async (req, res) => {
     try {
         const guests = await Guest.find({});
@@ -60,42 +108,49 @@ export const getGuests = async (req, res) => {
 
 export const verifyGuest = async (req, res) => {
     try {
-        const { qrData } = req.body;
+        const { guestId } = req.params;
+        console.log('Verifying guest:', guestId);
 
-        // Encuentra el invitado por el código QR escaneado
-        const guest = await Guest.findById(qrData);
-
-        // Verifica si el invitado existe
+        const guest = await Guest.findById(guestId);
+        
         if (!guest) {
+            console.log('Guest not found:', guestId);
             return res.status(404).json({ 
                 success: false, 
                 message: 'Invitado no encontrado' 
             });
         }
 
-        // Verifica si el invitado ya ha ingresado
         if (guest.hasEntered) {
+            console.log('Guest already entered:', guestId);
             return res.status(400).json({ 
                 success: false, 
-                message: 'Código QR ya utilizado o inválido' 
+                message: 'El invitado ya ha ingresado' 
             });
         }
 
-        // Marca al invitado como ingresado y guarda los cambios
+        // Mark guest as entered
         guest.hasEntered = true;
+        guest.enteredAt = new Date();
         await guest.save();
 
-        return res.status(200).json({ 
+        console.log('Guest verified successfully:', guestId);
+        return res.json({ 
             success: true, 
-            message: 'Excelente, invitado verificado exitosamente',
-            guest 
+            message: 'Invitado verificado exitosamente',
+            guest: {
+                name: guest.name,
+                email: guest.email,
+                enteredAt: guest.enteredAt
+            }
         });
 
     } catch (error) {
-        console.error('Error al verificar invitado:', error);
+        console.error('Verification error:', error);
         return res.status(500).json({ 
             success: false, 
-            message: 'Error al verificar invitado' 
+            message: 'Error al verificar invitado',
+            error: error.message 
         });
     }
 };
